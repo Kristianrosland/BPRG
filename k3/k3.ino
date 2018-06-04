@@ -1,6 +1,7 @@
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include <Servo.h>
+#include <math.h>
  
 //Pins
 int laserPin = 6;
@@ -19,6 +20,7 @@ int MIN_ANGLE_TOP_SERVO = 25;
 int MAX_ANGLE_TOP_SERVO = 80;
 int topAngleAddr = 0;
 int bottomAngleAddr = 1;
+int topServoHorizontalAngleMs = 970;
  
 //Bluetooth stuff
 SoftwareSerial btSerial(12, 11, false);
@@ -66,7 +68,7 @@ void setup() {
   //topServo.write(topServoAngle);
   //bottomServo.write(bottomServoAngle);
   
-  safeDelay(500);
+  delay(500);
   Serial.println("Ready");
   tone(buzzer, 1000); 
   delay(200);      
@@ -100,12 +102,12 @@ void loop() {
 
 float float2ms(float degrees)
 {
-  return 1000.0 + degrees * 50.0/9.0;
+  return topServoHorizontalAngleMs + degrees * 50.0/9.0;
 }
 
 unsigned int int2ms(unsigned int degrees)
 {
-  return  1000 + degrees * 150 / 27;
+  return  topServoHorizontalAngleMs + degrees * 150 / 27;
 }
 
 void setX(const int xVal) {
@@ -120,26 +122,20 @@ void setY(const int yVal) {
 
  
 void autoFire() {
-  int minAngleX=40;
-  int maxAngleX=85;
-  int scanAngle=36;
+  int minAngleX=60;
+  int maxAngleX=72;
+  int scanAngle=38;
   int bestX=maxAngleX;
   int lowestDist=1000;
   
   rotateSlowlyTo(maxAngleX, scanAngle);
-  safeDelay(200);
+  delay(200);
   digitalWrite(laserPin, HIGH);
-/*
-  for (int i = 800; i < 1200; i++) {
-    topServo.writeMicroseconds(i);
-    Serial.println(i);
-    delay(10);
-  }
-  */
-  
+
+  //Find closest cup (X-direction)
   for (int i = maxAngleX; i >= minAngleX; i--) {
     rotateSlowlyTo(i, scanAngle);
-    safeDelay(500);
+    delay(500);
     int distance = 0;
     int strength = 0;
     getDistance(&distance,&strength);
@@ -152,26 +148,23 @@ void autoFire() {
   }  
   Serial.println("Best x rot is " + String(bestX) + " with distance " + String(lowestDist));
   rotateSlowlyTo(bestX, scanAngle);
-  safeDelay(2000);
+  delay(2000);
 
-
-
-  
-  for (int i = 20; i < 45; i++) {
-    rotateSlowlyTo(bestX, i);
-    safeDelay(500);
+  //Find distance to closest cup
+  for (int i = topServoHorizontalAngleMs-200; i < topServoHorizontalAngleMs; i++) {
+    delay(10);
+    topServo.writeMicroseconds(i);
     int distance = 0;
     int strength = 0;
     getDistance(&distance,&strength);
     Serial.println(String(i) + ";" + String(distance) + ";" + String(strength));
   }
   
-  
   digitalWrite(laserPin, LOW);
 
   int angle=75;
   rotateSlowlyTo(bestX, angle);
-  safeDelay(200);
+  delay(200);
   fire();
 }
 
@@ -198,10 +191,7 @@ void rotateSlowlyTo(const int xVal, const int yVal) {
         setY(topServoAngle);
       }
       delay(20);
-
-      
   }
-
 }
  
 void rotateDirectly(const int xVal, const int yVal) {
@@ -218,7 +208,7 @@ void rotateDirectly(const int xVal, const int yVal) {
   topServo.write(topServoAngle);
   EEPROM.write(topAngleAddr, topServoAngle);
   
-  safeDelay(delayTime);
+  delay(delayTime);
 }
  
 void rotate(const int value) {
@@ -251,7 +241,7 @@ void rotate(const int value) {
     topServo.write(topServoAngle);
   }
   //Delay and write angles to EEPROM (local storage)
-  safeDelay(20);
+  delay(20);
   EEPROM.write(topAngleAddr, topServoAngle);
   EEPROM.write(bottomAngleAddr, bottomServoAngle);
   char buf[10];
@@ -267,7 +257,7 @@ void rotate(const int value) {
 void fire() {
   Serial.println("Fire!!");
   digitalWrite(fanPin, LOW);
-  safeDelay(500);
+  delay(500);
   digitalWrite(fanPin, HIGH);
 }
 
@@ -345,16 +335,6 @@ void getTFminiData(int* distance, int* strength) {
   }  
 }
  
-void laserOnOff(boolean on) {
-  //TODO
-}
- 
-void safeDelay(const int delayTime) {
-  for (int i = 0; i < delayTime; i += 20) {
-    delay(20);
-  }
-}
- 
 //HELPERS
 int readTripleDigit() {
   int value = 0;
@@ -369,3 +349,37 @@ int readDigit() {
   while(!btSerial.available()) {}
   return btSerial.read()-48; //-48 to convert from ASCII
 }
+
+
+ 
+struct Point {
+    typedef Point P;
+    double x, y;
+    explicit Point(double _x, double _y) {
+        x = _x;
+        y = _y;
+    }
+    
+    P operator+ (P p) const { return P(x + p.x, y + p.y); }
+    P operator* (double d) const { return P(x * d, y * d); }
+    P rotate(double a) const {
+        return P(x * cos(a) - y * sin(a), x * sin(a) + y * cos(a));
+    }
+    
+};
+
+ 
+double calcDist(double angle) {
+    double platformHeight = 14.2;
+ 
+    double theta = M_PI * angle / 180;
+    double platformToPipeLength = 12;
+    double pipeLength = 33.5;
+ 
+    Point l_vec = Point(platformToPipeLength, 0).rotate(theta);
+    Point h_vec = (l_vec * (pipeLength / platformToPipeLength)).rotate(-M_PI / 2);
+    Point final_point = l_vec + h_vec;
+    
+    return final_point.y + platformHeight;
+}
+
