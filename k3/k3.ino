@@ -20,7 +20,7 @@ int MIN_ANGLE_TOP_SERVO = 25;
 int MAX_ANGLE_TOP_SERVO = 80;
 int topAngleAddr = 0;
 int bottomAngleAddr = 1;
-int topServoHorizontalAngleMs = 970;
+int topServoHorizontalAngleMs = 985;
  
 //Bluetooth stuff
 SoftwareSerial btSerial(12, 11, false);
@@ -58,18 +58,12 @@ void setup() {
   if (bottomServoAngle == 0) {
     bottomServoAngle = 45;
   }
-
+  
   topServo.write(topServoAngle);
   bottomServo.write(bottomServoAngle);
-
   bottomServo.attach(bottomServoPin);
   topServo.attach(topServoPin);
  
-  //topServo.write(topServoAngle);
-  //bottomServo.write(bottomServoAngle);
-  
-  delay(500);
-  Serial.println("Ready");
   tone(buzzer, 1000); 
   delay(200);      
   noTone(buzzer); 
@@ -79,7 +73,8 @@ void loop() {
   int buttonState = digitalRead(powerButtonPin);
   if (buttonState == 1) {
     Serial.println("Click!");
-    autoFire();
+    //autoFire();
+    measureTest();
   }
  
   if (btSerial.available()) {
@@ -120,6 +115,9 @@ void setY(const int yVal) {
   EEPROM.write(topAngleAddr, topServoAngle);
 }
 
+void measureTest() {
+  
+}
  
 void autoFire() {
   int minAngleX=60;
@@ -127,7 +125,7 @@ void autoFire() {
   int scanAngle=38;
   int bestX=maxAngleX;
   int lowestDist=1000;
-  
+    
   rotateSlowlyTo(maxAngleX, scanAngle);
   delay(200);
   digitalWrite(laserPin, HIGH);
@@ -262,7 +260,6 @@ void fire() {
 }
 
 void getDistance(int* rDist, int* rStr) {
-
   unsigned int dist = 0;
   unsigned int str = 0;
 
@@ -280,8 +277,6 @@ void getDistance(int* rDist, int* rStr) {
     
                 t2 <<= 8;
                 t2 += t1;
-                //Serial.print(t2);
-                //Serial.print('\t');
                 dist=t2;
     
                 t1 = Serial.read(); //Byte5
@@ -290,7 +285,6 @@ void getDistance(int* rDist, int* rStr) {
                 t2 <<= 8;
                 t2 += t1;
                 str=t2;
-                //Serial.println(t2);
     
                 for(int i=0; i<3; i++) 
                 { 
@@ -301,9 +295,6 @@ void getDistance(int* rDist, int* rStr) {
   }
   *rDist=dist;
   *rStr=str;
-
-
-
 }
  
 //Distance measure
@@ -350,8 +341,7 @@ int readDigit() {
   return btSerial.read()-48; //-48 to convert from ASCII
 }
 
-
- 
+/*
 struct Point {
     typedef Point P;
     double x, y;
@@ -369,12 +359,12 @@ struct Point {
 };
 
  
-double calcDist(double angle) {
+double getLidarHeight(double angle) {
     double platformHeight = 14.2;
  
     double theta = M_PI * angle / 180;
-    double platformToPipeLength = 12;
-    double pipeLength = 33.5;
+    double platformToPipeLength = 12.3;
+    double pipeLength = 34.2;
  
     Point l_vec = Point(platformToPipeLength, 0).rotate(theta);
     Point h_vec = (l_vec * (pipeLength / platformToPipeLength)).rotate(-M_PI / 2);
@@ -382,4 +372,4 @@ double calcDist(double angle) {
     
     return final_point.y + platformHeight;
 }
-
+*/
