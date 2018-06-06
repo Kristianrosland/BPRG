@@ -14,13 +14,14 @@ int buzzer = 13;
 //Servo stuff
 Servo bottomServo;
 Servo topServo;
-int bottomServoAngle = 45;
-int topServoAngle = 45;
-int MIN_ANGLE_TOP_SERVO = 25;
-int MAX_ANGLE_TOP_SERVO = 80;
-int topAngleAddr = 0;
-int bottomAngleAddr = 1;
-int topServoHorizontalAngleMs = 985;
+int MIN_ANGLE_TOP_SERVO = 760;
+int MAX_ANGLE_TOP_SERVO = 1350;
+int MIN_ANGLE_BOTTOM_SERVO = 1100;
+int MAX_ANGLE_BOTTOM_SERVO = 1300;
+int TOP_SERVO_MIDDLE = 985;
+int BOTTOM_SERVO_MIDDLE = 1200;
+int bottomServoMs;
+int topServoMs;
  
 //Bluetooth stuff
 SoftwareSerial btSerial(12, 11, false);
@@ -50,17 +51,7 @@ void setup() {
   digitalWrite(fanPin, HIGH);
  
   //Servo setup
-  topServoAngle = EEPROM.read(topAngleAddr);
-  bottomServoAngle = EEPROM.read(bottomAngleAddr);
-  if (topServoAngle == 0) {
-    topServoAngle = (MIN_ANGLE_TOP_SERVO + MAX_ANGLE_TOP_SERVO) / 2;
-  }
-  if (bottomServoAngle == 0) {
-    bottomServoAngle = 45;
-  }
-  
-  topServo.write(topServoAngle);
-  bottomServo.write(bottomServoAngle);
+  rotateDirectly(BOTTOM_SERVO_MIDDLE, TOP_SERVO_MIDDLE);
   bottomServo.attach(bottomServoPin);
   topServo.attach(topServoPin);
  
@@ -72,9 +63,7 @@ void setup() {
 void loop() {
   int buttonState = digitalRead(powerButtonPin);
   if (buttonState == 1) {
-    Serial.println("Click!");
-    //autoFire();
-    measureTest();
+    autoFire();
   }
  
   if (btSerial.available()) {
@@ -82,183 +71,151 @@ void loop() {
     if (val == 'z') {
       int newX = readTripleDigit();
       int newY = readTripleDigit();
-      rotateDirectly(newX, newY);
+      //rotateDirectly(newX, newY);
     }
     else if (val == 'f') {
       fire();
     } else if (val == 'a') {
       autoFire();
     } else {
-      rotate(val);
+      //rotate(val);
     }
   }
-  
 }
 
-float float2ms(float degrees)
-{
-  return topServoHorizontalAngleMs + degrees * 50.0/9.0;
-}
-
-unsigned int int2ms(unsigned int degrees)
-{
-  return  topServoHorizontalAngleMs + degrees * 150 / 27;
-}
-
-void setX(const int xVal) {
-  bottomServo.write(bottomServoAngle);
-  EEPROM.write(bottomAngleAddr, bottomServoAngle);
-}
-
-void setY(const int yVal) {
-  topServo.write(topServoAngle);
-  EEPROM.write(topAngleAddr, topServoAngle);
-}
-
-void measureTest() {
-  
-}
- 
 void autoFire() {
-  int minAngleX=60;
-  int maxAngleX=72;
-  int scanAngle=38;
-  int bestX=maxAngleX;
-  int lowestDist=1000;
-    
-  rotateSlowlyTo(maxAngleX, scanAngle);
-  delay(200);
-  digitalWrite(laserPin, HIGH);
-
-  //Find closest cup (X-direction)
-  for (int i = maxAngleX; i >= minAngleX; i--) {
-    rotateSlowlyTo(i, scanAngle);
-    delay(500);
-    int distance = 0;
-    int strength = 0;
-    getDistance(&distance,&strength);
-    Serial.println("At xVal " + String(i) + " the distance is " + String(distance) + " strenth is " + String(strength));
-    if (distance<lowestDist) {
-      bestX=i;
-      lowestDist=distance;
-      Serial.println("new shortest " + String(bestX) + " with distance " + String(lowestDist));
-    }
-  }  
-  Serial.println("Best x rot is " + String(bestX) + " with distance " + String(lowestDist));
-  rotateSlowlyTo(bestX, scanAngle);
-  delay(2000);
-
-  //Find distance to closest cup
-  for (int i = topServoHorizontalAngleMs-200; i < topServoHorizontalAngleMs; i++) {
-    delay(10);
-    topServo.writeMicroseconds(i);
-    int distance = 0;
-    int strength = 0;
-    getDistance(&distance,&strength);
-    Serial.println(String(i) + ";" + String(distance) + ";" + String(strength));
-  }
+  laser(true);
   
-  digitalWrite(laserPin, LOW);
+  int x_closest_ms;
+  int distance;
+  findClosestCup(&x_closest_ms, &distance);
 
-  int angle=75;
-  rotateSlowlyTo(bestX, angle);
-  delay(200);
-  fire();
+  laser(false);
+  
+  fireOnTarget(x_closest_ms, distance);
 }
 
-void rotateSlowlyTo(const int xVal, const int yVal) {
-  if (xVal < 0 || xVal > 180 || yVal < MIN_ANGLE_TOP_SERVO || yVal > MAX_ANGLE_TOP_SERVO) {
-    Serial.println("Invalid rotation, " + String(xVal) + ", " + String(yVal));
-    return;
+void findClosestCup(int* x_closest_ms, int* shortest_distance) {
+  int distance = 0;
+  int strength = 0;
+  int minMs=MIN_ANGLE_BOTTOM_SERVO;
+  int maxMs=MAX_ANGLE_BOTTOM_SERVO;
+  int scanHeight=TOP_SERVO_MIDDLE - 50;
+  int bestX = -1;
+  int shortest = 1000;
+
+  //Get in position
+  rotate(maxMs, scanHeight);
+  delay(200);
+
+  //Scan to find closest cup
+  for (int ms = maxMs; ms >= minMs; ms--) {
+    rotate(ms, scanHeight);
+    delay(50);
+    
+    getDistance(&distance, &strength);
+    if (distance < shortest) { 
+      Serial.println("New shortest, " + String(ms) + ": " + String(distance));
+      shortest = distance;
+      bestX = ms;
+    }
   }
 
-  while(bottomServoAngle!=xVal||topServoAngle!=yVal) {
-    if (xVal<bottomServoAngle) {
-        bottomServoAngle = bottomServoAngle - 1;
-        setX(bottomServoAngle);
-      } else if(xVal>bottomServoAngle) {
-        bottomServoAngle = bottomServoAngle + 1;
-        setX(bottomServoAngle);
-      }
+  *x_closest_ms = bestX;
+  *shortest_distance = shortest;
+}
 
-      if (yVal<topServoAngle) {
-        topServoAngle = topServoAngle - 1;
-        setY(topServoAngle);
-      } else if(yVal>topServoAngle) {
-        topServoAngle = topServoAngle + 1;
-        setY(topServoAngle);
-      }
-      delay(20);
+void fireOnTarget(int x, int dist) {
+  int y = calculateFireAngle(dist);
+  boolean success = rotate(x, y);
+  if (success) {
+    countdown(3);
+    fire(); 
   }
+}
+
+int calculateFireAngle(int distance) {
+  return MAX_ANGLE_TOP_SERVO; //TODO
+}
+
+boolean rotate(const int xMs, const int yMs) {
+  boolean success = true;
+  while (!(bottomServoMs == xMs && topServoMs == yMs) && success) {
+    if (bottomServoMs != xMs) {
+      bottomServoMs += (xMs - bottomServoMs) / abs(xMs - bottomServoMs); // +-1 in the right direction
+    }
+    if (topServoMs != yMs) {
+      topServoMs += (yMs - topServoMs) / abs(yMs - topServoMs); // +-1 in the right direction
+    }
+    
+    //Rotate and keep successvalue
+    success &= setBottomServo(bottomServoMs);
+    success &= setTopServo(topServoMs);
+    delay(5);
+  }
+  return success;
 }
  
-void rotateDirectly(const int xVal, const int yVal) {
-  if (xVal < 0 || xVal > 180 || yVal < MIN_ANGLE_TOP_SERVO || yVal > MAX_ANGLE_TOP_SERVO) {
-    Serial.println("Invalid rotation, " + String(xVal) + ", " + String(yVal));
-    return;
-  }
-  int delayTime = max(abs(bottomServoAngle-xVal), abs(topServoAngle-yVal)) * 20;
-  bottomServoAngle = xVal;
-  topServoAngle = yVal;
+void rotateDirectly(const int xMs, const int yMs) {
+  int delayTime = max(abs(bottomServoMs-xMs), abs(topServoMs-yMs)) * 5;
 
-  bottomServo.write(bottomServoAngle);
-  EEPROM.write(bottomAngleAddr, bottomServoAngle);
-  topServo.write(topServoAngle);
-  EEPROM.write(topAngleAddr, topServoAngle);
-  
+  setBottomServo(xMs);
+  setTopServo(yMs);
   delay(delayTime);
 }
- 
-void rotate(const int value) {
-  if (value == 'l') {
-    bottomServoAngle = bottomServoAngle + 1;
-    if (bottomServoAngle > 180) {
-      bottomServoAngle = 180;
-    }
-    bottomServo.write(bottomServoAngle);
-  }
-  if (value == 'r') {
-    bottomServoAngle = bottomServoAngle - 1;
-    if (bottomServoAngle < 0) {
-      bottomServoAngle = 0;
-    }
-    bottomServo.write(bottomServoAngle);
-  }
-  if (value == 'u') {
-    topServoAngle= topServoAngle + 1;
-    if (topServoAngle > MAX_ANGLE_TOP_SERVO) {
-      topServoAngle = MAX_ANGLE_TOP_SERVO;
-    }
-    topServo.write(topServoAngle);
-  }
-  if (value == 'd') {
-    topServoAngle= topServoAngle - 1;
-    if (topServoAngle < MIN_ANGLE_TOP_SERVO) {
-      topServoAngle = MIN_ANGLE_TOP_SERVO;
-    }
-    topServo.write(topServoAngle);
-  }
-  //Delay and write angles to EEPROM (local storage)
-  delay(20);
-  EEPROM.write(topAngleAddr, topServoAngle);
-  EEPROM.write(bottomAngleAddr, bottomServoAngle);
-  char buf[10];
-  if (value == 'd' || value == 'u') {
-    sprintf(buf, "y%d", topServoAngle);
-  } else {
-    sprintf(buf, "x%d", bottomServoAngle);
-  }
- 
-  btSerial.println(buf);
+
+boolean setTopServo(const int ms) {
+  if (ms < MIN_ANGLE_TOP_SERVO || ms > MAX_ANGLE_TOP_SERVO) { Serial.println("Illegal rotation, x = " + String(ms)); return false; }
+  topServoMs = ms;
+  topServo.writeMicroseconds(ms);
+  return true;
+}
+
+boolean setBottomServo(const int ms) {
+  if (ms < MIN_ANGLE_BOTTOM_SERVO || ms > MAX_ANGLE_BOTTOM_SERVO) { Serial.println("Illegal rotation, y = " + String(ms)); return false; }
+  bottomServoMs = ms;
+  bottomServo.writeMicroseconds(ms);
+  return true;
 }
  
 void fire() {
-  Serial.println("Fire!!");
   digitalWrite(fanPin, LOW);
   delay(500);
   digitalWrite(fanPin, HIGH);
 }
 
+void laser(boolean on) {
+  digitalWrite(laserPin, on ? HIGH : LOW);
+}
+
+//Delay x seconds, playing the buzzer for each second
+void countdown(int seconds) {
+  for (int i = 1; i <= seconds; i++) {
+    tone(buzzer, 1000); 
+    delay(200 + (i == seconds ? 300 : 0));      
+    noTone(buzzer); 
+    delay(500);
+  }
+}
+
+/** HELPER FUNCTIONS **/
+
+//Used to read from bluetooth
+int readTripleDigit() {
+  int value = 0;
+  value += 100 * readDigit();
+  value += 10 * readDigit();
+  value += 1 * readDigit();
+ 
+  return value;
+}
+ 
+int readDigit() {
+  while(!btSerial.available()) {}
+  return btSerial.read()-48; //-48 to convert from ASCII
+}
+
+//Get distance from TF-mini
 void getDistance(int* rDist, int* rStr) {
   unsigned int dist = 0;
   unsigned int str = 0;
@@ -296,80 +253,3 @@ void getDistance(int* rDist, int* rStr) {
   *rDist=dist;
   *rStr=str;
 }
- 
-//Distance measure
-void getTFminiData(int* distance, int* strength) {
-  static char i = 0;
-  char j = 0;
-  int checksum = 0;
-  static int rx[9];
-  if(Serial.available()) {  
-    Serial.println("Available");
-    rx[i] = Serial.read();
-    Serial.println("Read " + String(rx[i]));
-    if(rx[0] != 0x59) {
-      i = 0;
-    } else if(i == 1 && rx[1] != 0x59) {
-      i = 0;
-    } else if(i == 8) {
-      for(j = 0; j < 8; j++) {
-        checksum += rx[j];
-      }
-      if(rx[8] == (checksum % 256)) {
-        *distance = rx[2] + rx[3] * 256;
-        *strength = rx[4] + rx[5] * 256;
-      }
-      i = 0;
-    } else {
-      i++;
-    }
-  }  
-}
- 
-//HELPERS
-int readTripleDigit() {
-  int value = 0;
-  value += 100 * readDigit();
-  value += 10 * readDigit();
-  value += 1 * readDigit();
- 
-  return value;
-}
- 
-int readDigit() {
-  while(!btSerial.available()) {}
-  return btSerial.read()-48; //-48 to convert from ASCII
-}
-
-/*
-struct Point {
-    typedef Point P;
-    double x, y;
-    explicit Point(double _x, double _y) {
-        x = _x;
-        y = _y;
-    }
-    
-    P operator+ (P p) const { return P(x + p.x, y + p.y); }
-    P operator* (double d) const { return P(x * d, y * d); }
-    P rotate(double a) const {
-        return P(x * cos(a) - y * sin(a), x * sin(a) + y * cos(a));
-    }
-    
-};
-
- 
-double getLidarHeight(double angle) {
-    double platformHeight = 14.2;
- 
-    double theta = M_PI * angle / 180;
-    double platformToPipeLength = 12.3;
-    double pipeLength = 34.2;
- 
-    Point l_vec = Point(platformToPipeLength, 0).rotate(theta);
-    Point h_vec = (l_vec * (pipeLength / platformToPipeLength)).rotate(-M_PI / 2);
-    Point final_point = l_vec + h_vec;
-    
-    return final_point.y + platformHeight;
-}
-*/
